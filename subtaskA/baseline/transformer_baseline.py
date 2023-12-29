@@ -2,7 +2,7 @@ from datasets import Dataset
 import pandas as pd
 import evaluate
 import numpy as np
-from transformers import AutoModelForSequenceClassification, TrainingArguments, Trainer, DataCollatorWithPadding, AutoTokenizer, set_seed
+from transformers import AutoModelForSequenceClassification, TrainingArguments, Trainer, DataCollatorWithPadding, AutoTokenizer, AutoConfig, set_seed
 import os
 from sklearn.model_selection import train_test_split
 from scipy.special import softmax
@@ -23,6 +23,13 @@ def get_data(train_path, test_path, random_seed):
     
     train_df, val_df = train_test_split(train_df, test_size=0.2, stratify=train_df['label'], random_state=random_seed)
 
+    percentOfData = 10
+    train_df = train_df.sample(int(len(train_df)*percentOfData/100))
+    val_df = val_df.sample(int(len(val_df)*percentOfData/100))
+    test_df = test_df.sample(int(len(test_df)*percentOfData/100))
+    print(len(train_df))
+    print(len(val_df))
+    print(len(test_df))
     return train_df, val_df, test_df
 
 def compute_metrics(eval_pred):
@@ -39,10 +46,12 @@ def compute_metrics(eval_pred):
 
 
 def fine_tune(train_df, valid_df, checkpoints_path, id2label, label2id, model):
-
+        
+    
     # pandas dataframe to huggingface Dataset
     train_dataset = Dataset.from_pandas(train_df)
     valid_dataset = Dataset.from_pandas(valid_df)
+    
     
     # get tokenizer and model from huggingface
     tokenizer = AutoTokenizer.from_pretrained(model)     # put your model here
@@ -53,7 +62,7 @@ def fine_tune(train_df, valid_df, checkpoints_path, id2label, label2id, model):
     # tokenize data for train/valid
     tokenized_train_dataset = train_dataset.map(preprocess_function, batched=True, fn_kwargs={'tokenizer': tokenizer})
     tokenized_valid_dataset = valid_dataset.map(preprocess_function, batched=True,  fn_kwargs={'tokenizer': tokenizer})
-    
+
 
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
@@ -81,6 +90,7 @@ def fine_tune(train_df, valid_df, checkpoints_path, id2label, label2id, model):
         compute_metrics=compute_metrics,
     )
 
+    print("START TRAIN")
     trainer.train()
 
     # save best model
@@ -91,10 +101,12 @@ def fine_tune(train_df, valid_df, checkpoints_path, id2label, label2id, model):
     
 
     trainer.save_model(best_model_path)
+    print("TRAINED MODEL SAVED!")
+
 
 
 def test(test_df, model_path, id2label, label2id):
-    
+            
     # load tokenizer from saved model 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
 
@@ -125,9 +137,27 @@ def test(test_df, model_path, id2label, label2id):
     # return dictionary of classification report
     return results, preds
 
+def downloadHuggingFaceRepo(model):
+    from huggingface_hub import snapshot_download
+    
+    absolute_path = os.path.abspath('pretrained_models/' + model)
+    #print(absolute_path)
+    #exit()    
+    snapshot_download(repo_id=model, local_dir=absolute_path)
 
-if __name__ == '__main__':
-
+def downloadHuggingFaceModel(model):    
+    tokenizer = AutoTokenizer.from_pretrained(model)     # put your model here    
+    config = AutoConfig.from_pretrained(model)
+    absolute_path = os.path.abspath('pretrained_models/' + model)
+    tokenizer.save_pretrained(absolute_path)
+    config.save_pretrained(absolute_path)
+    vocab_path = absolute_path + "/vocab/"
+    tokenizer.save_vocabulary(vocab_path)
+    
+    print("tokenizer saved!")
+    
+    
+def readArgs():
     parser = argparse.ArgumentParser()
     parser.add_argument("--train_file_path", "-tr", required=True, help="Path to the train file.", type=str)
     parser.add_argument("--test_file_path", "-t", required=True, help="Path to the test file.", type=str)
@@ -136,14 +166,29 @@ if __name__ == '__main__':
     parser.add_argument("--prediction_file_path", "-p", required=True, help="Path where to save the prediction file.", type=str)
 
     args = parser.parse_args()
+    return args
+    
+if __name__ == '__main__':
+    #downloadHuggingFaceModel('xlm-roberta-base')
+    #exit()   
+    #args = readArgs()    
 
     random_seed = 0
-    train_path =  args.train_file_path # For example 'subtaskA_train_multilingual.jsonl'
-    test_path =  args.test_file_path # For example 'subtaskA_test_multilingual.jsonl'
-    model =  args.model # For example 'xlm-roberta-base'
-    subtask =  args.subtask # For example 'A'
-    prediction_path = args.prediction_file_path # For example subtaskB_predictions.jsonl
+    #train_path =  args.train_file_path # For example 'subtaskA_train_multilingual.jsonl'
+    #test_path =  args.test_file_path # For example 'subtaskA_test_multilingual.jsonl'
+    #model =  args.model # For example 'xlm-roberta-base'
+    #subtask =  args.subtask # For example 'A'
+    #prediction_path = args.prediction_file_path # For example subtaskB_predictions.jsonl
 
+    absolute_path = os.path.abspath('subtaskA/data')
+    print(absolute_path)
+    exit()
+    train_path = absolute_path + '/subtaskA_train_monolingual.jsonl'
+    test_path = absolute_path + '/subtaskA_dev_monolingual.jsonl'
+    prediction_path = absolute_path + '/subtaskA_prediction_monolingual.jsonl'
+    subtask='A'
+    model='xlm-roberta-base'
+    
     if not os.path.exists(train_path):
         logging.error("File doesnt exists: {}".format(train_path))
         raise ValueError("File doesnt exists: {}".format(train_path))
@@ -169,8 +214,9 @@ if __name__ == '__main__':
     train_df, valid_df, test_df = get_data(train_path, test_path, random_seed)
     
     # train detector model
-    fine_tune(train_df, valid_df, f"{model}/subtask{subtask}/{random_seed}", id2label, label2id, model)
-
+    #fine_tune(train_df, valid_df, f"{model}/subtask{subtask}/{random_seed}", id2label, label2id, model)
+    #exit()
+    
     # test detector model
     results, predictions = test(test_df, f"{model}/subtask{subtask}/{random_seed}/best/", id2label, label2id)
     

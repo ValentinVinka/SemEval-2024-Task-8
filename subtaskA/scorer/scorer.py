@@ -1,5 +1,6 @@
 import logging.handlers
 import argparse
+import os
 from sklearn.metrics import f1_score, accuracy_score
 import pandas as pd
 import sys
@@ -45,15 +46,22 @@ def validate_files(pred_files):
   return True
 
 
+def readArgs():
+    parser = argparse.ArgumentParser()
+    parser.add_argument( "--gold_file_path", '-g', type=str, required=True, help="Paths to the file with gold annotations.")
+    parser.add_argument("--pred_file_path", '-p', type=str, required=True, help="Path to the file with predictions")
+    args = parser.parse_args()
+    return args
+  
 if __name__ == '__main__':
-  parser = argparse.ArgumentParser()
-  parser.add_argument( "--gold_file_path", '-g', type=str, required=True, help="Paths to the file with gold annotations.")
-  parser.add_argument("--pred_file_path", '-p', type=str, required=True, help="Path to the file with predictions")
-  args = parser.parse_args()
 
-  pred_file_path = args.pred_file_path
-  gold_file_path = args.gold_file_path
+  #args = readArgs()  
+  #pred_file_path = args.pred_file_path
+  #gold_file_path = args.gold_file_path
+  absolute_path = os.path.abspath('subtaskA/data')
 
+  gold_file_path = absolute_path + '/subtaskA_train_monolingual.jsonl'
+  pred_file_path = absolute_path + '/subtaskA_prediction_monolingual2.jsonl'
   if validate_files(pred_file_path):
     logging.info('Prediction file format is correct')
     macro_f1, micro_f1, accuracy = evaluate(pred_file_path, gold_file_path)
