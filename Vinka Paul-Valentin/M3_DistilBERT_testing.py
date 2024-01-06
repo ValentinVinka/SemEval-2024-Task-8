@@ -76,24 +76,36 @@ model = model.to(device)
 
 print('Testing')
 # Evaluation loop
-predictions, true_labels = [], []
-for batch in test_loader:
-    input_ids = batch['input_ids'].to(device)
-    attention_mask = batch['attention_mask'].to(device)
 
-    with torch.no_grad():
-        outputs = model(input_ids, attention_mask=attention_mask)
+# Open a text file to write the results
+with open('test_results_monolingual.txt', 'w', encoding='utf-8') as result_file:
+    # Evaluation loop
+    predictions, true_labels = [], []
+    for batch in test_loader:
+        input_ids = batch['input_ids'].to(device)
+        attention_mask = batch['attention_mask'].to(device)
 
-    logits = outputs.logits.detach().cpu().numpy()
-    label_ids = batch['labels'].to('cpu').numpy()
+        with torch.no_grad():
+            outputs = model(input_ids, attention_mask=attention_mask)
 
-    predictions.append(logits)
-    true_labels.append(label_ids)
+        logits = outputs.logits.detach().cpu().numpy()
+        label_ids = batch['labels'].to('cpu').numpy()
 
-# Calculate the accuracy
-predictions = np.concatenate(predictions, axis=0)
-true_labels = np.concatenate(true_labels, axis=0)
-predictions = np.argmax(predictions, axis=1)
-accuracy = accuracy_score(true_labels, predictions)
+        predictions.append(logits)
+        true_labels.append(label_ids)
+
+        # Optional: Write individual batch results to file
+        for i in range(len(logits)):
+            result_file.write(f'Text: {test_texts[i]}\n')
+            result_file.write(f'Predicted: {np.argmax(logits[i])}, Actual: {label_ids[i]}\n\n')
+
+    # Calculate the accuracy
+    predictions = np.concatenate(predictions, axis=0)
+    true_labels = np.concatenate(true_labels, axis=0)
+    predictions = np.argmax(predictions, axis=1)
+    accuracy = accuracy_score(true_labels, predictions)
+
+    # Write the overall accuracy to the file
+    result_file.write(f'Accuracy: {accuracy:.2f}\n')
 
 print(f'Accuracy: {accuracy:.2f}')
