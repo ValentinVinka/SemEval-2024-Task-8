@@ -14,8 +14,8 @@ def load_jsonl(file_path):
     return data
 
 # Load training and testing data
-train_data = load_jsonl(r'C:\Master\IA1\Sem1\Semantica_si_Pragmatica_Limbajului_Natural\Proiect\subtaskA_train_monolingual.jsonl')
-test_data = load_jsonl(r'C:\Master\IA1\Sem1\Semantica_si_Pragmatica_Limbajului_Natural\Proiect\subtaskA_dev_monolingual.jsonl')
+train_data = load_jsonl(r'../subtaskA/data/subtaskA_train_monolingual.jsonl')
+test_data = load_jsonl(r'../subtaskA/data/subtaskA_dev_monolingual.jsonl')
 
 # Convert JSONL data to DataFrame
 train_df = pd.DataFrame(train_data)
