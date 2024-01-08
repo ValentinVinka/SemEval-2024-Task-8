@@ -14,11 +14,11 @@ def preprocess_text(text):
     return text.lower()
 
 # File paths for original data and preprocessed output
-train_data_path = r'C:\Master\IA1\Sem1\Semantica_si_Pragmatica_Limbajului_Natural\Proiect\subtaskA_train_monolingual.jsonl'
-test_data_path = r'C:\Master\IA1\Sem1\Semantica_si_Pragmatica_Limbajului_Natural\Proiect\subtaskA_dev_monolingual.jsonl'
+train_data_path = r'../subtaskA/data/subtaskA_train_monolingual.jsonl'
+test_data_path = r'../subtaskA/data/subtaskA_dev_monolingual.jsonl'
 
-train_output_path = r'C:\Master\IA1\Sem1\Semantica_si_Pragmatica_Limbajului_Natural\Proiect\subtaskA_train_monolingual_preprocessed.jsonl'
-test_output_path = r'C:\Master\IA1\Sem1\Semantica_si_Pragmatica_Limbajului_Natural\Proiect\subtaskA_dev_monolingual_preprocessed.jsonl'
+train_output_path = r'../subtaskA/data/subtaskA_train_monolingual_preprocessed.jsonl'
+test_output_path = r'../subtaskA/data/subtaskA_dev_monolingual_preprocessed.jsonl'
 
 # Load training and testing data
 train_data = load_jsonl(train_data_path)
