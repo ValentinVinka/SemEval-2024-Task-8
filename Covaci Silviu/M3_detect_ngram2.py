@@ -64,11 +64,13 @@ def test_model(train_df, model_path, output_path):
     return predicted
 
 absolute_path = os.path.abspath('subtaskA/data')
-print(absolute_path)
     
 train_path = absolute_path + '/subtaskA_train_monolingual.jsonl'
 test_path = absolute_path + '/subtaskA_dev_monolingual.jsonl'
 prediction_path = absolute_path + '/subtaskA_prediction_monolingual.jsonl'
+
+print(train_path)
+exit()
 
 # Load training and testing data
 train_data = load_jsonl(train_path)

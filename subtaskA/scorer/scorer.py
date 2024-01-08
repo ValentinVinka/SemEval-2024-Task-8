@@ -60,8 +60,8 @@ if __name__ == '__main__':
   #gold_file_path = args.gold_file_path
   absolute_path = os.path.abspath('subtaskA/data')
 
-  gold_file_path = absolute_path + '/subtaskA_train_monolingual.jsonl'
-  pred_file_path = absolute_path + '/subtaskA_prediction_monolingual2.jsonl'
+  gold_file_path = absolute_path + '/subtaskA_dev_monolingual.jsonl'
+  pred_file_path = absolute_path + '/subtaskA_prediction_monolingual_pytorch_distilbert.jsonl'
   if validate_files(pred_file_path):
     logging.info('Prediction file format is correct')
     macro_f1, micro_f1, accuracy = evaluate(pred_file_path, gold_file_path)

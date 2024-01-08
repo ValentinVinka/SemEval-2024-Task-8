@@ -51,3 +51,6 @@ subtaskA/baseline/.DS_Store
 .DS_Store
 subtaskA/data/test
 subtaskA/data/test
+subtaskA/model_3mdetect/RoBERTa for text classification.ipynb
+subtaskA/format_checker/__pycache__/format_checker.cpython-311.pyc
+Covaci Silviu/M3_detect_ngram2.py
