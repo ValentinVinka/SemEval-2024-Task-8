@@ -57,3 +57,6 @@ Covaci Silviu/M3_detect_ngram2.py
 best_distilbert.pt
 best_roberta.pt
 best_roberta-large.pt
+best_distilbert v1.pt
+3mdetect_distilbert-base-uncased.pt
+m3detect_mgram.model.pkl
