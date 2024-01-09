@@ -56,3 +56,4 @@ subtaskA/format_checker/__pycache__/format_checker.cpython-311.pyc
 Covaci Silviu/M3_detect_ngram2.py
 best_distilbert.pt
 best_roberta.pt
+best_roberta-large.pt

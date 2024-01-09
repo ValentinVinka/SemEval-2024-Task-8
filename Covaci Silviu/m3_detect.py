@@ -11,6 +11,7 @@ import nltk
 import string
 
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, accuracy_score
 
 from transformers import AutoTokenizer, AutoModel
 from torch.utils.data import DataLoader
@@ -288,32 +289,35 @@ def load_and_evaluate(test_path, prediction_path, tokenizer, model_name):
     predictions_df = pd.DataFrame({'id': test_df['id']})
     test_dataloader = DataLoader(DetectDataset(test_df, tokenizer), batch_size=8, shuffle=False, num_workers=0)
     predictions_df['label'] = get_text_predictions(model, test_dataloader)
-    print("predictions=", predictions_df)
     #
     predictions_df.to_json(prediction_path, lines=True, orient='records')
-    
+    merged_df = predictions_df.merge(test_df, on='id', suffixes=('_pred', '_gold'))
+    accuracy = accuracy_score(merged_df['label_gold'], merged_df['label_pred'])
+    print("Accuracy:", accuracy)
     
 torch.manual_seed(0)
 np.random.seed(0)
 
 absolute_path = os.path.abspath('subtaskA/data')
 
-train_path = absolute_path + '/subtaskA_train_monolingual.jsonl'
-test_path = absolute_path + '/subtaskA_dev_monolingual.jsonl'
-prediction_path = absolute_path + '/subtaskA_prediction_monolingual_pytorch_distilbert.jsonl'
 
-#layer1_in = 768
+#layer1_in = 768 #for distilbert, roberta-base
 #layer1_out = 32 
 
-layer1_in = 1024
+layer1_in = 1024 #for roberta large
 layer1_out = 8
 
 BERT_MODEL = "roberta-large"
-model_name="roberta-large"
+model_name="best_roberta-large"
 #model_name="best_distilbert"
 #BERT_MODEL = "distilbert-base-uncased"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 tokenizer = AutoTokenizer.from_pretrained(BERT_MODEL)
 base_model = AutoModel.from_pretrained(BERT_MODEL)
-#load_and_evaluate(test_path, prediction_path, tokenizer, model_name)
-create_and_train(train_path, tokenizer, base_model, model_name)
+
+test_path = absolute_path + '/subtaskA_dev_monolingual.jsonl'
+prediction_path = absolute_path + '/subtaskA_prediction_monolingual_pytorch_' + BERT_MODEL + '.jsonl'
+load_and_evaluate(test_path, prediction_path, tokenizer, model_name)
+
+#train_path = absolute_path + '/subtaskA_train_monolingual.jsonl'
+#create_and_train(train_path, tokenizer, base_model, model_name)
