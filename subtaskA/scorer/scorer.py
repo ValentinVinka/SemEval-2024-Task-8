@@ -2,6 +2,7 @@ import logging.handlers
 import argparse
 import os
 from sklearn.metrics import f1_score, accuracy_score
+from sklearn.metrics import classification_report
 import pandas as pd
 import sys
 sys.path.append('.')
@@ -36,6 +37,8 @@ def evaluate(pred_fpath, gold_fpath):
   micro_f1 = f1_score(merged_df['label_gold'], merged_df['label_pred'], average="micro", zero_division=0)
   accuracy = accuracy_score(merged_df['label_gold'], merged_df['label_pred'])
   
+  # Evaluate the classifier
+  print(classification_report(merged_df['label_gold'], merged_df['label_pred']))
   return macro_f1, micro_f1, accuracy
 
 
@@ -60,8 +63,10 @@ if __name__ == '__main__':
   #gold_file_path = args.gold_file_path
   absolute_path = os.path.abspath('subtaskA/data')
 
+  pred_file_name = '202401112145_subtaskA_monolingual_roberta-large.predictions.jsonl'
   gold_file_path = absolute_path + '/subtaskA_dev_monolingual.jsonl'
-  pred_file_path = absolute_path + '/subtaskA_prediction_monolingual_pytorch_roberta-large.jsonl'
+  pred_file_path = absolute_path + '/predictions/' + pred_file_name
+  
   if validate_files(pred_file_path):
     logging.info('Prediction file format is correct')
     macro_f1, micro_f1, accuracy = evaluate(pred_file_path, gold_file_path)

@@ -60,3 +60,13 @@ best_roberta-large.pt
 best_distilbert v1.pt
 3mdetect_distilbert-base-uncased.pt
 m3detect_mgram.model.pkl
+subtaskA/data/models/202401110953_subtaskA_monolingual_roberta-large.pt
+subtaskA/data/models/202401112145_subtaskA_monolingual_roberta-large.pt
+subtaskA/data/models/202401120919_subtaskA_monolingual_distilbert-base-uncased.pt
+subtaskA/data/models/202401121124_subtaskA_monolingual_distilbert-base-uncased.pt
+subtaskA/data/models/202401121508_subtaskA_monolingual_distilbert-base-uncased.pt
+subtaskA/data/models/202401131813_subtaskA_monolingual_roberta-base.pt
+3mdetect_adamw__distilbert-base-uncased.pt
+3mdetect_adamw_cls1_distilbert-base-uncased.pt
+3mdetect_finetune1__distilbert-base-uncased.pt
+202401110953_subtaskA_monolingual_roberta-large.pt

@@ -1,27 +1,27 @@
+import numpy as np
+import pandas as pd
+
 import torch
 from torch import nn
 from torch.utils.data import Dataset
-from torch.optim import Adam
-
-from tqdm import tqdm
-import numpy as np
-import pandas as pd
-import re
-import nltk
-import string
-
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, accuracy_score
-from sklearn.pipeline import Pipeline, FeatureUnion
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import FunctionTransformer
-from transformers import AutoTokenizer, AutoModel
+from torch.optim import Adam, AdamW
 from torch.utils.data import DataLoader
 
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, accuracy_score, classification_report
+from transformers import AutoTokenizer, AutoModel
+
+from tqdm import tqdm
+
+import nltk
+import re
+import string
+import json
+from datetime import datetime
+import types
 import pickle
 import os
+
 
 app_configs = {}
 
@@ -127,9 +127,9 @@ class PreprocessDataset(Dataset):
     
     
 #classifier for roberta base,bert, distilbert with 768 neurons on layer 1 and 32 on layer 2
-class CustomClassifier1(nn.Module):
+class CustomClassifierBase(nn.Module):
     def __init__(self, pretrained_model):
-        super(CustomClassifier1, self).__init__()
+        super(CustomClassifierBase, self).__init__()
 
         self.bert = pretrained_model
         self.fc1 = nn.Linear(768, 32)
@@ -150,12 +150,12 @@ class CustomClassifier1(nn.Module):
         return x
 
 #classifier for roberta large with 1024 neurons on layer 1 and 8 on layer 2
-class CustomClassifier2(nn.Module):
+class CustomClassifierRobertaLarge(nn.Module):
     def __init__(self, pretrained_model):
-        super(CustomClassifier1, self).__init__()
+        super(CustomClassifierRobertaLarge, self).__init__()
 
         self.bert = pretrained_model
-        self.fc1 = nn.Linear(1024, 32)
+        self.fc1 = nn.Linear(1024, 8)
         self.fc2 = nn.Linear(8, 1)
 
         self.relu = nn.ReLU()
@@ -172,6 +172,66 @@ class CustomClassifier2(nn.Module):
 
         return x
     
+#classifier for roberta base,bert, distilbert with 768 neurons on layer 1 and 32 on layer 2 and 8 on layer 3
+class CustomClassifierBase3Layers(nn.Module):
+    def __init__(self, pretrained_model):
+        super(CustomClassifierBase3Layers, self).__init__()
+
+        self.bert = pretrained_model
+        self.fc1 = nn.Linear(768, 32)
+        self.fc2 = nn.Linear(32, 32)
+        self.fc3 = nn.Linear(32, 1)
+
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
+        
+    def forward(self, input_ids, attention_mask):
+        bert_out = self.bert(input_ids=input_ids,
+                             attention_mask=attention_mask)[0][:, 0]
+        x = self.fc1(bert_out)
+        x = self.relu(x)
+        
+        x = self.fc2(x)
+        x = self.relu(x)
+        
+        x = self.fc3(x)
+        x = self.sigmoid(x)
+
+        return x
+
+class DistilbertCustomClassifier(nn.Module):
+    def __init__(self,
+                 bert_model,
+                 num_labels = 1, 
+                 bert_hidden_dim=768, 
+                 classifier_hidden_dim=32, 
+                 dropout=None):
+        
+        super().__init__()
+        self.bert_model = bert_model
+        # nn.Identity does nothing if the dropout is set to None
+        self.head = nn.Sequential(nn.Linear(bert_hidden_dim, classifier_hidden_dim),
+                                  nn.ReLU(),
+                                  nn.Dropout(dropout) if dropout is not None else nn.Identity(),
+                                  nn.Linear(classifier_hidden_dim, num_labels))
+    
+    def forward(self, input_ids, attention_mask):
+        # feeding the input_ids and masks to the model. These are provided by our tokenizer
+        output = self.bert_model(input_ids=input_ids, attention_mask=attention_mask)
+        # obtaining the last layer hidden states of the Transformer
+        last_hidden_state = output.last_hidden_state # shape: (batch_size, seq_length, bert_hidden_dim)
+        # As I said, the CLS token is in the beginning of the sequence. So, we grab its representation 
+        # by indexing the tensor containing the hidden representations
+        CLS_token_state = last_hidden_state[:, 0, :]
+        # passing this representation through our custom head
+        logits = self.head(CLS_token_state)
+        return logits
+            
+def str_to_class(s):
+    #if s in globals() and isinstance(globals()[s], types.ClassType):
+    return globals()[s]
+    
+
 def target_device():
     #gpu support for Mac
     use_mps = torch.backends.mps.is_available()
@@ -188,7 +248,8 @@ def train(model, train_dataloader, val_dataloader, learning_rate, epochs, model_
     
     device = app_configs['device']
     criterion = nn.BCELoss()
-    optimizer = Adam(model.parameters(), lr=learning_rate)
+    #optimizer = Adam(model.parameters(), lr=learning_rate)
+    optimizer = AdamW(model.parameters(), lr=learning_rate)
 
     model = model.to(device)
     criterion = criterion.to(device)
@@ -200,6 +261,7 @@ def train(model, train_dataloader, val_dataloader, learning_rate, epochs, model_
         model.train()
         
         for train_input, train_label in tqdm(train_dataloader):
+            optimizer.zero_grad()
             attention_mask = train_input['attention_mask'].to(device)
             input_ids = train_input['input_ids'].squeeze(1).to(device)
 
@@ -216,7 +278,7 @@ def train(model, train_dataloader, val_dataloader, learning_rate, epochs, model_
 
             loss.backward()
             optimizer.step()
-            optimizer.zero_grad()
+            
 
         with torch.no_grad():
             total_acc_val = 0
@@ -247,7 +309,7 @@ def train(model, train_dataloader, val_dataloader, learning_rate, epochs, model_
             
             if best_val_loss > total_loss_val:
                 best_val_loss = total_loss_val
-                torch.save(model, model_name + ".pt")
+                torch.save(model, app_configs['models_path'] + model_name + ".pt")
                 print("Saved model")
                 early_stopping_threshold_count = 0
             else:
@@ -287,66 +349,28 @@ def get_pretrained_model():
     app_configs['pretrained_model'] = pretrained_model
     return tokenizer, pretrained_model
     
-#Funcție pentru a obține reprezentări DistilBERT pentru un text
-def get_distilbert_embedding(text):
-    tokens = app_configs['tokenizer'](text, return_tensors='pt')
-    # Mutarea datelor pe GPU
-    tokens = {key: value.to(app_configs['device']) for key, value in tokens.items()}
-    with torch.no_grad():
-        outputs = app_configs['pretrained_model'](**tokens)
-    return outputs.last_hidden_state.mean(dim=1).squeeze()
-   
-def get_data(train_path, test_path, random_seed):
+  
+def get_train_data(train_path, random_seed = 0):
     """
     function to read dataframe with columns
     """
 
     train_df = pd.read_json(train_path, lines=True)
-    test_df = pd.read_json(test_path, lines=True)
     
-    train_df, val_df = train_test_split(train_df, test_size=0.2, stratify=train_df['label'], random_state=random_seed)
 
-    percentOfData = 10
+    percentOfData = app_configs['percent_of_data']
     train_df = train_df.sample(int(len(train_df)*percentOfData/100))
-    val_df = val_df.sample(int(len(val_df)*percentOfData/100))
-    test_df = test_df.sample(int(len(test_df)*percentOfData/100))
     print(len(train_df))
-    print(len(val_df))
-    print(len(test_df))
-    return train_df, val_df, test_df    
+    return train_df    
 
-def pipeline_train(traid_df):
-    # Exemplu de date
-    texts = traid_df['text']
-    labels = traid_df['label']
-
-    # Divizați setul de date în antrenare și testare
-    X_train, X_test, y_train, y_test = train_test_split(texts, labels, test_size=0.2, random_state=42)
-
-    # Construiți un pipeline cu TfidfVectorizer și un clasificator
-    pipeline = Pipeline([
-        ('features', FeatureUnion([
-            ('tfidf', TfidfVectorizer()),
-            ('distilbert', FunctionTransformer(get_distilbert_embedding, validate=False))
-        ])),
-        ('classifier', LogisticRegression())
-    ])
-    # Mutarea întregului pipeline pe GPU
-    #pipeline.named_steps['classifier'].to(app_configs['device'])
-
-    # Antrenați pipeline-ul pe datele de antrenare
-    pipeline.fit(X_train, y_train)   
-    # Salvați modelul într-un fișier
-    with open(app_configs['model_name'] + ".pipeline", 'wb') as file:
-        pickle.dump(pipeline, file)
-        
-    #joblib.dump(pipeline, app_configs['model_name'] + ".pipeline")
-    
+   
 def create_and_train():
     #global app_configs
        
     # Load JSON file with dataset. Perform basic transformations.
-    train_df = pd.read_json(app_configs['train_path'], lines=True)
+    #train_df = pd.read_json(app_configs['train_path'], lines=True)
+    train_df = get_train_data(app_configs['train_path'])    
+    
     train_df, val_df = train_test_split(train_df, test_size=0.2, random_state=42)
 
     train_df = train_df.drop(["model", "source"], axis=1)
@@ -358,22 +382,23 @@ def create_and_train():
     train_dataloader = DataLoader(PreprocessDataset(train_df, tokenizer), batch_size=8, shuffle=True, num_workers=0)
     val_dataloader = DataLoader(PreprocessDataset(val_df, tokenizer), batch_size=8, num_workers=0)
 
-    if (app_configs['pipeline']):
-        pipeline_train(train_df)
-    else:
-        myModel = app_configs['classifier'](pretrained_model)
-        train(myModel, train_dataloader, val_dataloader, app_configs['learning_rate'], app_configs['epochs'], app_configs['model_name'])
     
-def load_and_evaluate():
+    classifierClass = str_to_class(app_configs['classifier'])
+    myModel = classifierClass(pretrained_model)
+    train(myModel, train_dataloader, val_dataloader, app_configs['learning_rate'], app_configs['epochs'], app_configs['model_name'])
+    
+def load_and_evaluate(model_name = ''):
     #global app_configs
-    
+    if (model_name):
+        app_configs['model_name'] = model_name
+        
     test_df = pd.read_json(app_configs['test_path'], lines=True)
     test_df = test_df.drop(["model", "source"], axis=1)
     
     target_device()
     tokenizer, pretrained_model = get_pretrained_model()
     
-    model = torch.load(app_configs['model_name'] + ".pt")
+    model = torch.load(app_configs['models_path'] + app_configs['model_name'] + ".pt")
     
     predictions_df = pd.DataFrame({'id': test_df['id']})
     test_dataloader = DataLoader(PreprocessDataset(test_df, tokenizer), batch_size=8, shuffle=False, num_workers=0)
@@ -382,8 +407,30 @@ def load_and_evaluate():
     predictions_df.to_json(app_configs['prediction_path'], lines=True, orient='records')
     merged_df = predictions_df.merge(test_df, on='id', suffixes=('_pred', '_gold'))
     accuracy = accuracy_score(merged_df['label_gold'], merged_df['label_pred'])
+    app_configs['accuracy'] = accuracy
     print("Accuracy:", accuracy)
+    print(classification_report(merged_df['label_gold'], merged_df['label_pred']))
+    if (model_name == ''): #save app options only when evaluation is called right after training
+        save_app_options()
+
+def save_app_options():
+    configs = app_configs.copy()
+    configs_keys = configs.keys()
     
+    keys_2_del = {'tokenizer', 'pretrained_model', 'prediction_path', 'results_path', 'options_path', 'options_path', 'classifier', 'device'}
+    for del_key in keys_2_del:
+        configs.pop(del_key, None)
+           
+        
+    # Writing to sample.json
+    with open(app_configs['options_path'], "w") as outfile:
+        json.dump(configs, outfile)
+        
+# datetime object containing current date and time
+start_now = datetime.now()
+start_time= start_now.strftime("%Y-%m-%d %H-%M")
+timestamp_prefix = start_now.strftime("%Y%m%d%H%M")
+print("process start at:", start_time)
 torch.manual_seed(0)
 np.random.seed(0)
 
@@ -392,36 +439,63 @@ absolute_path = os.path.abspath('subtaskA/data')
 
 distilbert_model_configs1 = {
     'base_model': 'distilbert-base-uncased',
-    'classifier': CustomClassifier1,
-    'pipeline': 1,
-    'model_prefix': '3mdetect_pipeline'
+    'classifier': 'CustomClassifierBase',
+}
+
+distilbert_model_configs2 = {
+    'base_model': 'distilbert-base-uncased',
+    'classifier': 'CustomClassifierBase3Layers',
+    'learning_rate': 2e-5,
 }
 
 robertabase_model_configs1 = {
-    'base_model': 'roberta-large',
-    'classifier': CustomClassifier1, 
+    'base_model': 'roberta-base',
+    'classifier': 'CustomClassifierBase', 
 }
 
 robertalarge_model_configs1 = {
-    'base_model': 'roberta-large',
-    
-    'classifier': CustomClassifier2, 
+    'base_model': 'roberta-large',    
+    'classifier': 'CustomClassifierRobertaLarge', 
+    'percent_of_data': 100,
 }
 
 default_configs = {
-    'model_prefix': '3mdetect',
     'learning_rate': 1e-5,
-    'epochs': 5
+    'epochs': 5,
+    'task': 'subtaskA_monolingual',
+    'timestamp_prefix': timestamp_prefix,
+    'train_path': absolute_path + '/subtaskA_train_monolingual.jsonl',
+    'test_path': absolute_path + '/subtaskA_dev_monolingual.jsonl',
+    'percent_of_data': 100,
+    'options_path': absolute_path + '/predictions/'  + 'tests.results.jsonl',
+    'models_path':  absolute_path + '/models/',
 }
 
-app_configs = default_configs.copy()
-app_configs.update(distilbert_model_configs1)
 
-app_configs['model_name'] = app_configs['model_prefix'] + "_" + app_configs['base_model']
-app_configs['train_path'] = absolute_path + '/subtaskA_train_monolingual.jsonl'
-app_configs['test_path'] = absolute_path + '/subtaskA_dev_monolingual.jsonl'
-app_configs['prediction_path'] = absolute_path + '/predictions/subtaskA_prediction_monolingual_' + app_configs['model_name'] + '.jsonl'
+app_configs = default_configs.copy()
+app_configs.update(robertabase_model_configs1)
+
+app_configs['model_name'] = app_configs['timestamp_prefix'] + "_" + app_configs['task'] + "_" + app_configs['base_model']
+app_configs['prediction_path'] = absolute_path + '/predictions/' + app_configs['model_name'] + '.predictions.jsonl'
+app_configs['options_path'] = absolute_path + '/predictions/'  + app_configs['model_name'] + '.options.jsonl'
+app_configs['results_path'] = absolute_path + '/predictions/'  + app_configs['model_name'] + '.results.jsonl'
 
 print("Working on pretrained-model:", app_configs['base_model'])
+
+#model names that can be used for evaluation:
+#model name roberta-large trained = 202401112145_subtaskA_monolingual_roberta-large
+#model name for distilbert-base-uncased trained = 202401120919_subtaskA_monolingual_distilbert-base-uncased - 2 layers
+
+model_for_evaluate=''
 create_and_train()
-#load_and_evaluate()
+load_and_evaluate(model_for_evaluate)
+
+end_now = datetime.now()
+end_time = end_now.strftime("%Y-%m-%d %H-%M")
+print("process finished at:", end_time)
+running_time = (end_now - start_now).total_seconds()
+app_configs['start_time'] = start_time
+app_configs['end_time'] = end_time
+app_configs['running_time'] = running_time
+if (model_for_evaluate == ''): 
+    save_app_options()
