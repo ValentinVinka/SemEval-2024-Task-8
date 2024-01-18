@@ -70,3 +70,5 @@ subtaskA/data/models/202401131813_subtaskA_monolingual_roberta-base.pt
 3mdetect_adamw_cls1_distilbert-base-uncased.pt
 3mdetect_finetune1__distilbert-base-uncased.pt
 202401110953_subtaskA_monolingual_roberta-large.pt
+subtaskA/data/models/202401150757_subtaskA_monolingual_bert-base-uncased.pt
+subtaskA/data/models/202401161438_subtaskA_monolingual_distilbert-base-uncased.pt

@@ -30,18 +30,7 @@ def get_vectorised_data(train_df, test_df):
     test_vectors = tfidf_vectorizer.transform(test_df['text'])
     return train_vectors, test_vectors
     
-def vectorise_data(df):
-     # Adjusting TfidfVectorizer parameters
-    tfidf_vectorizer = TfidfVectorizer(ngram_range=(1, 2))  # Using unigrams and bigrams
-    # You can also explore other parameters like max_features, min_df, max_df, etc.
-
-    # Concatenate training and testing data for vectorization
-    all_data = pd.concat([train_df['text'], test_df['text']])
-    # Fit and transform using the updated vectorizer
-    tfidf_vectorizer.fit(df['text'])
-    vectors = tfidf_vectorizer.transform(df['text'])
-    return vectors
-    
+   
 def train_model(train_df, test_df, model_path):
    
 
@@ -51,7 +40,7 @@ def train_model(train_df, test_df, model_path):
     train_vectors, test_vectors = get_vectorised_data(train_df, test_df)
     
     # Train a simple Linear SVM classifier
-    classifier = LinearSVC()
+    classifier = LinearSVC(dual=True)
     classifier.fit(train_vectors, train_labels)
     
     # Salvați modelul într-un fișier
@@ -98,7 +87,7 @@ test_df = pd.DataFrame(test_data)
 model_path = 'm3detect_mgram.model.pkl'
 prediction_path = absolute_path + '/subtaskA_prediction_monolingual3.jsonl'
 
-#train_model(train_df, test_df, model_path)
+train_model(train_df, test_df, model_path)
 test_model(train_df, test_df, model_path, prediction_path)
 
 print("done!")

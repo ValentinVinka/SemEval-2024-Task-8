@@ -7,9 +7,12 @@ from torch.utils.data import Dataset
 from torch.optim import Adam, AdamW
 from torch.utils.data import DataLoader
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.svm import LinearSVC
+from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, accuracy_score, classification_report
-from transformers import AutoTokenizer, AutoModel
+from transformers import AutoTokenizer, AutoModel, AutoConfig, get_linear_schedule_with_warmup
 
 from tqdm import tqdm
 
@@ -172,6 +175,30 @@ class CustomClassifierRobertaLarge(nn.Module):
 
         return x
     
+class CustomClassifierAlbertLarge(nn.Module):
+    def __init__(self, pretrained_model):
+        super(CustomClassifierAlbertLarge, self).__init__()
+
+        self.bert = pretrained_model
+        self.fc1 = nn.Linear(2048, 32)
+        self.fc2 = nn.Linear(32, 1)
+
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
+        
+    def forward(self, input_ids, attention_mask):        
+        print("CustomClassifierAlbertLarge before bert:", input_ids, attention_mask)
+        bert_out = self.bert(input_ids=input_ids,
+                             attention_mask=attention_mask)[0][:, 0]
+        print("CustomClassifierAlbertLarge forward:", bert_out)
+        x = self.fc1(bert_out)
+        x = self.relu(x)
+        
+        x = self.fc2(x)
+        x = self.sigmoid(x)
+
+        return x
+        
 #classifier for roberta base,bert, distilbert with 768 neurons on layer 1 and 32 on layer 2 and 8 on layer 3
 class CustomClassifierBase3Layers(nn.Module):
     def __init__(self, pretrained_model):
@@ -227,6 +254,56 @@ class DistilbertCustomClassifier(nn.Module):
         logits = self.head(CLS_token_state)
         return logits
             
+class SentencePairClassifier(nn.Module):
+
+    def __init__(self, pretrained_model, freeze_bert=True):
+        super(SentencePairClassifier, self).__init__()
+        self.bert_layer = pretrained_model
+        
+        model_configs = AutoConfig.from_pretrained(app_configs['base_model'])
+        bert_model = model_configs._name_or_path
+        print(bert_model)
+        
+        #  Fix the hidden-state size of the encoder outputs (If you want to add other pre-trained models here, search for the encoder output size)
+        if bert_model == "albert-base-v2":  # 12M parameters
+            hidden_size = 768
+        elif bert_model == "albert-large-v2":  # 18M parameters
+            hidden_size = 1024
+        elif bert_model == "albert-xlarge-v2":  # 60M parameters
+            hidden_size = 2048
+        elif bert_model == "albert-xxlarge-v2":  # 235M parameters
+            hidden_size = 4096
+        elif bert_model == "bert-base-uncased": # 110M parameters
+            hidden_size = 768
+
+        # Freeze bert layers and only train the classification layer weights
+        if freeze_bert:
+            for p in self.bert_layer.parameters():
+                p.requires_grad = False
+
+        # Classification layer
+        self.cls_layer = nn.Linear(hidden_size, 1)
+
+        self.dropout = nn.Dropout(p=0.1)
+
+    def forward(self, input_ids, attn_masks, token_type_ids = None):
+        '''
+        Inputs:
+            -input_ids : Tensor  containing token ids
+            -attn_masks : Tensor containing attention masks to be used to focus on non-padded values
+            -token_type_ids : Tensor containing token type ids to be used to identify sentence1 and sentence2
+        '''
+
+        # Feeding the inputs to the BERT-based model to obtain contextualized representations
+        cont_reps, pooler_output = self.bert_layer(input_ids, attn_masks, token_type_ids)
+
+        # Feeding to the classifier layer the last layer hidden-state of the [CLS] token further processed by a
+        # Linear Layer and a Tanh activation. The Linear layer weights were trained from the sentence order prediction (ALBERT) or next sentence prediction (BERT)
+        # objective during pre-training.
+        logits = self.cls_layer(self.dropout(pooler_output))
+
+        return logits  
+                
 def str_to_class(s):
     #if s in globals() and isinstance(globals()[s], types.ClassType):
     return globals()[s]
@@ -248,7 +325,6 @@ def train(model, train_dataloader, val_dataloader, learning_rate, epochs, model_
     
     device = app_configs['device']
     criterion = nn.BCELoss()
-    #optimizer = Adam(model.parameters(), lr=learning_rate)
     optimizer = AdamW(model.parameters(), lr=learning_rate)
 
     model = model.to(device)
@@ -344,7 +420,7 @@ def get_pretrained_model():
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     tokenizer = AutoTokenizer.from_pretrained(app_configs['base_model'])
     pretrained_model = AutoModel.from_pretrained(app_configs['base_model'])
-    
+        
     app_configs['tokenizer'] = tokenizer
     app_configs['pretrained_model'] = pretrained_model
     return tokenizer, pretrained_model
@@ -413,6 +489,31 @@ def load_and_evaluate(model_name = ''):
     if (model_name == ''): #save app options only when evaluation is called right after training
         save_app_options()
 
+def creare_train_evaluate_vectorised():
+    target_device()    
+    tokenizer, pretrained_model = get_pretrained_model()
+    
+    # Construirea unui pipeline care include obținerea reprezentărilor de la BERT, extragerea de caracteristici cu TF-IDF și LinearSVC
+    #classifier = Pipeline([
+    #    ('bert_embeddings', FunctionTransformer(get_bert_embeddings)),
+    #    ('clf', LinearSVC())
+    #])
+    # Construirea unui pipeline care include tokenizarea BERT, extragerea de caracteristici cu TF-IDF și LinearSVC
+    classifier = Pipeline([
+        ('tokenizer', tokenizer),
+        ('vectorizer', TfidfVectorizer(tokenizer=tokenizer.tokenize)),
+        ('clf', LinearSVC())
+    ])
+
+    train_df = get_train_data(app_configs['train_path'])    
+    
+    train_preprocessed = PreprocessDataset(train_df, tokenizer)
+    print(train_preprocessed)
+    exit()
+    # Antrenarea modelului pe datele de antrenare
+    classifier.fit(X_train, y_train)
+
+    
 def save_app_options():
     configs = app_configs.copy()
     configs_keys = configs.keys()
@@ -459,6 +560,16 @@ robertalarge_model_configs1 = {
     'percent_of_data': 100,
 }
 
+bert_model_configs1 = {
+    'base_model': 'bert-base-uncased',
+    'classifier': 'CustomClassifierBase',
+}
+
+albert_model_configs1 = {
+    'base_model': 'albert-base-v2',
+    'classifier': 'SentencePairClassifier',
+}
+
 default_configs = {
     'learning_rate': 1e-5,
     'epochs': 5,
@@ -473,7 +584,7 @@ default_configs = {
 
 
 app_configs = default_configs.copy()
-app_configs.update(robertabase_model_configs1)
+app_configs.update(albert_model_configs1)
 
 app_configs['model_name'] = app_configs['timestamp_prefix'] + "_" + app_configs['task'] + "_" + app_configs['base_model']
 app_configs['prediction_path'] = absolute_path + '/predictions/' + app_configs['model_name'] + '.predictions.jsonl'
@@ -486,6 +597,8 @@ print("Working on pretrained-model:", app_configs['base_model'])
 #model name roberta-large trained = 202401112145_subtaskA_monolingual_roberta-large
 #model name for distilbert-base-uncased trained = 202401120919_subtaskA_monolingual_distilbert-base-uncased - 2 layers
 
+#creare_train_evaluate_vectorised()
+#exit()
 model_for_evaluate=''
 create_and_train()
 load_and_evaluate(model_for_evaluate)
