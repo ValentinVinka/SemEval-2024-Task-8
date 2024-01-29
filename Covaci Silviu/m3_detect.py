@@ -12,7 +12,7 @@ from sklearn.svm import LinearSVC
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, accuracy_score, classification_report
-from transformers import AutoTokenizer, AutoModel, AutoConfig, get_linear_schedule_with_warmup
+from transformers import XLMRobertaConfig, AutoTokenizer, AutoModel, AutoModelForMaskedLM, AutoConfig, get_linear_schedule_with_warmup
 
 from tqdm import tqdm
 
@@ -25,6 +25,9 @@ import types
 import pickle
 import os
 
+#from transformers import file_utils
+#print(file_utils.default_cache_path)
+#exit()
 
 app_configs = {}
 
@@ -68,7 +71,9 @@ class PreprocessDataset(Dataset):
 
         text_tokens = self._tokenize(text)
         text_tokens = self._stopword_filtering(text_tokens)
-        #text_tokens = self._stemming(text_tokens)
+        text_tokens = self._stemming(text_tokens)
+        text_tokens = self._lemmatisation(text_tokens)
+        
         text = self._stitch_text_tokens_together(text_tokens)
 
         return text.strip()
@@ -103,10 +108,16 @@ class PreprocessDataset(Dataset):
 
         return [token for token in text_tokens if token not in stop_words]
 
+    # Stemming (remove -ing, -ly, ...)
     def _stemming(self, text_tokens):
         porter = nltk.stem.porter.PorterStemmer()
         return [porter.stem(token) for token in text_tokens]
 
+    # Lemmatisation (convert the word into root word)
+    def _lemmatisation(self, text_tokens):
+        lem = nltk.stem.wordnet.WordNetLemmatizer()
+        return [lem.lemmatize(token) for token in text_tokens]
+    
     def _remove_numbers(self, text):
         return re.sub(r'\d+', ' ', text)
 
@@ -175,21 +186,40 @@ class CustomClassifierRobertaLarge(nn.Module):
 
         return x
     
-class CustomClassifierAlbertLarge(nn.Module):
+class CustomClassifierAlbert(nn.Module):
     def __init__(self, pretrained_model):
-        super(CustomClassifierAlbertLarge, self).__init__()
+        super(CustomClassifierAlbert, self).__init__()
 
+        model_configs = AutoConfig.from_pretrained(app_configs['base_model'])
+        bert_model = model_configs._name_or_path
+        print("Albert model:",bert_model)
+        
+        #  Fix the hidden-state size of the encoder outputs (If you want to add other pre-trained models here, search for the encoder output size)
+        if bert_model == "albert-base-v2":  # 12M parameters
+            hidden_size = 768
+        elif bert_model == "albert-large-v2":  # 18M parameters
+            hidden_size = 1024
+        elif bert_model == "albert-xlarge-v2":  # 60M parameters
+            hidden_size = 2048
+        elif bert_model == "albert-xxlarge-v2":  # 235M parameters
+            hidden_size = 4096
+        elif bert_model == "bert-base-uncased": # 110M parameters
+            hidden_size = 768
+            
+        print("Albert hidden_size:", hidden_size)            
         self.bert = pretrained_model
-        self.fc1 = nn.Linear(2048, 32)
+        self.fc1 = nn.Linear(hidden_size, 32)
         self.fc2 = nn.Linear(32, 1)
 
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
         
     def forward(self, input_ids, attention_mask):        
-        print("CustomClassifierAlbertLarge before bert:", input_ids, attention_mask)
-        bert_out = self.bert(input_ids=input_ids,
-                             attention_mask=attention_mask)[0][:, 0]
+        print("CustomClassifierAlbertLarge before bert:", input_ids.shape, attention_mask.shape)
+        bert_out = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        print("albert out");
+        bert_out = bert_out[0][:, 0]
+        
         print("CustomClassifierAlbertLarge forward:", bert_out)
         x = self.fc1(bert_out)
         x = self.relu(x)
@@ -254,10 +284,10 @@ class DistilbertCustomClassifier(nn.Module):
         logits = self.head(CLS_token_state)
         return logits
             
-class SentencePairClassifier(nn.Module):
+class AlbertClassifierOld(nn.Module):
 
     def __init__(self, pretrained_model, freeze_bert=True):
-        super(SentencePairClassifier, self).__init__()
+        super(AlbertClassifierOld, self).__init__()
         self.bert_layer = pretrained_model
         
         model_configs = AutoConfig.from_pretrained(app_configs['base_model'])
@@ -338,9 +368,10 @@ def train(model, train_dataloader, val_dataloader, learning_rate, epochs, model_
         
         for train_input, train_label in tqdm(train_dataloader):
             optimizer.zero_grad()
+        
             attention_mask = train_input['attention_mask'].to(device)
             input_ids = train_input['input_ids'].squeeze(1).to(device)
-
+            #print("for train size=", input_ids.shape, attention_mask.shape)    
             train_label = train_label.to(device)
 
             output = model(input_ids, attention_mask)
@@ -391,9 +422,9 @@ def train(model, train_dataloader, val_dataloader, learning_rate, epochs, model_
             else:
                 early_stopping_threshold_count += 1
                 
-            if early_stopping_threshold_count >= 1:
-                print("Early stopping")
-                break
+            #if early_stopping_threshold_count >= 1:
+            #    print("Early stopping")
+            #    break
 
 def get_text_predictions(model, loader):
     device = app_configs['device']
@@ -419,7 +450,13 @@ def get_pretrained_model():
     
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     tokenizer = AutoTokenizer.from_pretrained(app_configs['base_model'])
-    pretrained_model = AutoModel.from_pretrained(app_configs['base_model'])
+    
+    if (app_configs['base_model'] == 'xlm-roberta-base'):
+        print("load xlm")
+        exit()
+        pretrained_model = AutoModelForMaskedLM.from_pretrained(app_configs['base_model'])
+    else:
+        pretrained_model = AutoModel.from_pretrained(app_configs['base_model'])
         
     app_configs['tokenizer'] = tokenizer
     app_configs['pretrained_model'] = pretrained_model
@@ -567,7 +604,35 @@ bert_model_configs1 = {
 
 albert_model_configs1 = {
     'base_model': 'albert-base-v2',
-    'classifier': 'SentencePairClassifier',
+    'classifier': 'CustomClassifierAlbert',
+}
+
+robertamultilang_model_configs1 = {
+    'base_model': 'FacebookAI/xlm-roberta-base',
+    'classifier': 'CustomClassifierBase', 
+    'train_path': absolute_path + '/subtaskA_train_multilingual.jsonl',
+    'test_path': absolute_path + '/subtaskA_dev_multilingual.jsonl',
+}
+
+robertalargemultilang_model_configs1 = {
+    'base_model': 'FacebookAI/xlm-roberta-large',    
+    'classifier': 'CustomClassifierRobertaLarge', 
+    'train_path': absolute_path + '/subtaskA_train_multilingual.jsonl',
+    'test_path': absolute_path + '/subtaskA_dev_multilingual.jsonl',
+}
+
+distilbertmultilang_model_configs1 = {
+    'base_model': 'distilbert-base-multilingual-cased',
+    'classifier': 'CustomClassifierBase', 
+    'train_path': absolute_path + '/subtaskA_train_multilingual.jsonl',
+    'test_path': absolute_path + '/subtaskA_dev_multilingual.jsonl',
+}
+
+bertmultilang_model_configs1 = {
+    'base_model': 'bert-base-multilingual-cased',
+    'classifier': 'CustomClassifierBase', 
+    'train_path': absolute_path + '/subtaskA_train_multilingual.jsonl',
+    'test_path': absolute_path + '/subtaskA_dev_multilingual.jsonl',
 }
 
 default_configs = {
@@ -584,9 +649,9 @@ default_configs = {
 
 
 app_configs = default_configs.copy()
-app_configs.update(albert_model_configs1)
+app_configs.update(robertabase_model_configs1)
 
-app_configs['model_name'] = app_configs['timestamp_prefix'] + "_" + app_configs['task'] + "_" + app_configs['base_model']
+app_configs['model_name'] = app_configs['timestamp_prefix'] + "_" + app_configs['task'] + "_" + app_configs['base_model'].replace("/", "_")
 app_configs['prediction_path'] = absolute_path + '/predictions/' + app_configs['model_name'] + '.predictions.jsonl'
 app_configs['options_path'] = absolute_path + '/predictions/'  + app_configs['model_name'] + '.options.jsonl'
 app_configs['results_path'] = absolute_path + '/predictions/'  + app_configs['model_name'] + '.results.jsonl'
@@ -597,6 +662,9 @@ print("Working on pretrained-model:", app_configs['base_model'])
 #model name roberta-large trained = 202401112145_subtaskA_monolingual_roberta-large
 #model name for distilbert-base-uncased trained = 202401120919_subtaskA_monolingual_distilbert-base-uncased - 2 layers
 
+#multilang tests
+#model name for xlm_roberta_base = 202401201729_subtaskA_multilingual_FacebookAI_xlm-roberta-base
+#model name for distilbert-base-multilingual-cased = 202401231736_subtaskA_monolingual_distilbert-base-multilingual-cased.options.jsonl
 #creare_train_evaluate_vectorised()
 #exit()
 model_for_evaluate=''
